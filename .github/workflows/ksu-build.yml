@@ -1094,6 +1094,12 @@ jobs:
           mkdir -p KernelSU/userspace/ksud/bin/aarch64
           for kmi in $kmis; do
             src="/tmp/generic/kernelsu-${{ env.KSU_REF }}-${kmi}-no-patch-text/kernelsu.ko"
+            # A single matching artifact is extracted directly into path by
+            # download-artifact. Accept that layout only for a single KMI;
+            # never associate an ambiguous flat module with several KMIs.
+            if [ ! -s "$src" ] && [ "$kmis" = "$kmi" ] && [ -s /tmp/generic/kernelsu.ko ]; then
+              src=/tmp/generic/kernelsu.ko
+            fi
             if [ ! -s "$src" ]; then
               echo "::error::the module job built no no-patch-text module for $kmi"
               ls -1 /tmp/generic || true
