@@ -1,0 +1,223 @@
+diff --git a/userspace/ksud/src/cli.rs b/userspace/ksud/src/cli.rs
+index c987965..84a1936 100644
+--- a/userspace/ksud/src/cli.rs
++++ b/userspace/ksud/src/cli.rs
+@@ -142,7 +142,11 @@ enum Commands {
+ 
+     /// Emulate soft reboot (ksud; zygote)
+     #[command(name = "soft-reboot")]
+-    SoftReboot,
++    SoftReboot {
++        /// Restart Zygote only, retaining SurfaceFlinger and the vendor composer
++        #[arg(long)]
++        preserve_display: bool,
++    },
+ 
+     /// Susfs management
+     Susfs {
+@@ -843,7 +847,9 @@ pub fn run() -> Result<()> {
+             full_args.extend(args);
+             crate::resetprop::resetprop_main(&full_args)
+         }
+-        Commands::SoftReboot => crate::soft_reboot::soft_reboot(),
++        Commands::SoftReboot { preserve_display } => {
++            crate::soft_reboot::soft_reboot(preserve_display)
++        }
+ 
+         Commands::Insmod { module, params } => debug::insmod(&module, &params),
+ 
+diff --git a/userspace/ksud/src/soft_reboot.rs b/userspace/ksud/src/soft_reboot.rs
+index d9eb492..4ada0d6 100644
+--- a/userspace/ksud/src/soft_reboot.rs
++++ b/userspace/ksud/src/soft_reboot.rs
+@@ -148,7 +148,150 @@ fn wait_for_boot_completed() -> Result<()> {
+     Ok(())
+ }
+ 
+-pub fn soft_reboot() -> Result<()> {
++// A deliberate userspace restart creates another system_server in the same kernel boot.
++// Refund exactly that one start; retain the accumulated history of other failures.
++fn planned_boot_count(value: &str) -> Result<Option<String>> {
++    if value.is_empty() {
++        return Ok(None);
++    }
++    let count: u32 = value.parse().context("invalid Rescue Party boot count")?;
++    Ok(Some(count.saturating_sub(1).to_string()))
++}
++
++fn getprop(name: &str) -> Result<String> {
++    let output = Command::new("getprop").arg(name).output()?;
++    ensure!(output.status.success(), "getprop {name} failed");
++    Ok(String::from_utf8(output.stdout)?.trim().to_owned())
++}
++
++fn control_zygotes(command: &str, services: &[&str]) -> Result<()> {
++    // Never fall back to a bare stop/start: those also tear down SurfaceFlinger.
++    for service in services {
++        let status = Command::new(command).arg(service).status()?;
++        ensure!(status.success(), "{command} {service} failed: {status}");
++    }
++    Ok(())
++}
++
++fn recover_zygotes(services: &[&str]) {
++    for service in services.iter().rev() {
++        if let Err(error) = control_zygotes("start", &[service]) {
++            error!("Zygote recovery failed for {service}: {error:#}");
++        }
++    }
++}
++
++fn wait_zygotes_stopped(services: &[&str]) -> Result<()> {
++    let deadline = Instant::now() + Duration::from_secs(20);
++    loop {
++        let mut stopped = true;
++        for service in services {
++            stopped &= getprop(&format!("init.svc.{service}"))? == "stopped";
++        }
++        if stopped {
++            return Ok(());
++        }
++        ensure!(Instant::now() < deadline, "timed out stopping Zygote services");
++        std::thread::sleep(Duration::from_millis(100));
++    }
++}
++
++fn preserve_display_reboot() -> Result<()> {
++    sys_prop::init().context("Failed to initialize system property API")?;
++    ensure!(getprop("sys.boot_completed")? == "1", "Android is still booting");
++    ensure!(getprop("init.svc.zygote")? == "running", "Zygote is not running");
++    ensure!(
++        getprop("init.svc.surfaceflinger")? == "running",
++        "SurfaceFlinger is not running"
++    );
++
++    // Read/validate before making any lifecycle or property changes. Absent aliases
++    // are left absent. sys.prev.rescue_boot_count is historical and is not modified.
++    let mut counts = Vec::new();
++    for name in ["crashrecovery.rescue_boot_count", "sys.rescue_boot_count"] {
++        let original = getprop(name)?;
++        if let Some(adjusted) = planned_boot_count(&original)? {
++            counts.push((name, original, adjusted));
++        }
++    }
++    let mut services = Vec::new();
++    if getprop("init.svc.zygote_secondary")? == "running" {
++        services.push("zygote_secondary");
++    }
++    services.push("zygote");
++
++    let rp = resetprop();
++    let mut adjusted_counts = 0;
++    let mut stop_requested = false;
++    let mut framework_start_requested = false;
++    let result = (|| -> Result<()> {
++        reset_boot_completed()?;
++        run_stage(
++            "emulated-soft-reboot",
++            ScriptWait::Until(Instant::now() + defs::EMULATED_SOFT_REBOOT_TIMEOUT),
++        );
++        info!("preserve-display: stopping Zygote services only");
++        stop_requested = true;
++        control_zygotes("stop", &services)?;
++        wait_zygotes_stopped(&services)?;
++
++        info!("post-fs-data");
++        on_post_fs_data()?;
++
++        // Write immediately before starting the replacement framework, after the
++        // old framework has stopped, so it cannot consume/refill the adjustment.
++        for (name, _, adjusted) in &counts {
++            rp.set(name, adjusted)
++                .with_context(|| format!("adjusting {name} for planned restart"))?;
++            adjusted_counts += 1;
++        }
++        info!("preserve-display: starting Zygote services only");
++        // Start the primary first; secondary shutdown was deliberately first.
++        let start_order: Vec<_> = services.iter().rev().copied().collect();
++        framework_start_requested = true;
++        control_zygotes("start", &start_order)?;
++        Ok(())
++    })();
++
++    if let Err(e) = result {
++        // Never restore counters over a replacement system_server which may
++        // already have consumed them. Module side effects cannot be rolled back.
++        if !framework_start_requested {
++            for (name, original, _) in counts.iter().take(adjusted_counts) {
++                if let Err(restore_error) = rp.set(name, original) {
++                    error!("restore {name} failed: {restore_error}");
++                }
++            }
++        }
++        if stop_requested {
++            // Only refund the recovery start once the old primary really is
++            // stopped. If it is still stopping, retain failure history rather
++            // than writing counters while the old framework is alive.
++            if !framework_start_requested
++                && getprop("init.svc.zygote").unwrap_or_default() == "stopped"
++            {
++                for (name, _, adjusted) in &counts {
++                    if let Err(adjust_error) = rp.set(name, adjusted) {
++                        error!("recovery adjustment of {name} failed: {adjust_error}");
++                    }
++                }
++            }
++            recover_zygotes(&services);
++            // A stopped/restarted framework must publish its own boot completion.
++        } else if let Err(restore_error) = rp.set("sys.boot_completed", "1") {
++            error!("restore boot completion failed: {restore_error}");
++        }
++        return Err(e);
++    }
++
++    info!("services");
++    on_services();
++    wait_for_boot_completed()?;
++    on_boot_completed();
++    Ok(())
++}
++
++pub fn soft_reboot(preserve_display: bool) -> Result<()> {
+     // check it avoid user click "soft_reboot" in manager when version mismatch
+     if let Err(e) = ksucalls::ensure_uapi_version_matched() {
+         error!("{e:#}, skip soft_reboot");
+@@ -162,6 +305,10 @@ pub fn soft_reboot() -> Result<()> {
+     })?;
+ 
+     info!("emulating soft_reboot!");
++    if preserve_display {
++        preserve_display_reboot()?;
++        unsafe { _exit(0) };
++    }
+     if let Err(e) = reset_boot_completed() {
+         warn!("reset boot completed failed: {e}");
+     }
+@@ -220,3 +367,27 @@ pub fn soft_reboot() -> Result<()> {
+         _exit(0);
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::planned_boot_count;
++
++    #[test]
++    fn planned_restart_refunds_one_start_without_erasing_failure_history() {
++        assert_eq!(planned_boot_count("1").unwrap().as_deref(), Some("0"));
++        assert_eq!(planned_boot_count("4").unwrap().as_deref(), Some("3"));
++    }
++
++    #[test]
++    fn zero_and_missing_counter_are_handled_without_creating_an_alias() {
++        assert_eq!(planned_boot_count("0").unwrap().as_deref(), Some("0"));
++        assert_eq!(planned_boot_count("").unwrap(), None);
++    }
++
++    #[test]
++    fn invalid_counter_aborts_before_any_restart() {
++        assert!(planned_boot_count("-1").is_err());
++        assert!(planned_boot_count("unknown").is_err());
++        assert!(planned_boot_count("4294967296").is_err());
++    }
++}

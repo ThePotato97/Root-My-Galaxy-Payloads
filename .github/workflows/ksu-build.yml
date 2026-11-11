@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: ''
+      preserve_display:
+        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only; no publishing)'
+        required: false
+        type: boolean
+        default: false
       flavor:
         description: 'Which flavour to build'
         required: false
@@ -79,6 +84,11 @@ on:
         default: ''
   workflow_dispatch:
     inputs:
+      preserve_display:
+        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only; no publishing)'
+        required: false
+        type: boolean
+        default: false
       flavor:
         description: 'Which flavour to build'
         required: true
@@ -274,6 +284,18 @@ jobs:
         # fixes. Ours is never applied on top of theirs - that would be a tree with both.
         run: git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
 
+      - name: Apply experimental display-preserving restart
+        if: inputs.preserve_display
+        run: |
+          set -eu
+          test "$FLAVOR" = kernelsu-next
+          test "$KSU_REF" = v3.4.2
+          test "${{ inputs.publish }}" != true
+          test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
+          candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
+          git -C KernelSU apply --check "$candidate"
+          git -C KernelSU apply "$candidate"
+
       - name: Neither shortcut may drop what the full path does
         # Read out of the tree the patch above was applied to, so it covers whichever patch that was: a
         # release flavour's whole delta, or the test line's compat patch - and for that line the arming
@@ -360,7 +382,7 @@ jobs:
       - name: Upload ksud
         uses: actions/upload-artifact@v7
         with:
-          name: ksud-${{ env.FLAVOR }}-${{ env.KSU_REF }}-aarch64
+          name: ksud-${{ env.FLAVOR }}-${{ env.KSU_REF }}-aarch64${{ inputs.preserve_display && '-preserve-display' || '' }}
           # A glob, because where the binary lands is a property of the flavour's layout.
           path: KernelSU/**/aarch64-linux-android/release/ksud
           if-no-files-found: error
@@ -722,6 +744,18 @@ jobs:
         # fixes. Ours is never applied on top of theirs - that would be a tree with both.
         run: git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
 
+      - name: Apply experimental display-preserving restart
+        if: inputs.preserve_display
+        run: |
+          set -eu
+          test "$FLAVOR" = kernelsu-next
+          test "$KSU_REF" = v3.4.2
+          test "${{ inputs.publish }}" != true
+          test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
+          candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
+          git -C KernelSU apply --check "$candidate"
+          git -C KernelSU apply "$candidate"
+
       - name: Neither shortcut may drop what the full path does
         # Read out of the tree the patch above was applied to, so it covers whichever patch that was: a
         # release flavour's whole delta, or the test line's compat patch - and for that line the arming
@@ -841,7 +875,7 @@ jobs:
       - name: Upload the daemon
         uses: actions/upload-artifact@v7
         with:
-          name: pair-ksud-${{ env.FLAVOR }}-${{ inputs.target_id }}
+          name: pair-ksud-${{ env.FLAVOR }}-${{ inputs.target_id }}${{ inputs.preserve_display && '-preserve-display' || '' }}
           # The receipt is what the publish job re-checks against the module's, since by then neither
           # checkout exists.
           path: |
@@ -1021,6 +1055,18 @@ jobs:
         # fixes. Ours is never applied on top of theirs - that would be a tree with both.
         run: git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
 
+      - name: Apply experimental display-preserving restart
+        if: inputs.preserve_display
+        run: |
+          set -eu
+          test "$FLAVOR" = kernelsu-next
+          test "$KSU_REF" = v3.4.2
+          test "${{ inputs.publish }}" != true
+          test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
+          candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
+          git -C KernelSU apply --check "$candidate"
+          git -C KernelSU apply "$candidate"
+
       - name: Neither shortcut may drop what the full path does
         # Read out of the tree the patch above was applied to, so it covers whichever patch that was: a
         # release flavour's whole delta, or the test line's compat patch - and for that line the arming
@@ -1140,7 +1186,7 @@ jobs:
       - name: Upload the daemon
         uses: actions/upload-artifact@v7
         with:
-          name: generic-ksud-${{ env.FLAVOR }}
+          name: generic-ksud-${{ env.FLAVOR }}${{ inputs.preserve_display && '-preserve-display' || '' }}
           path: ksud${{ env.FLAVOR_SUFFIX }}-generic-kdp
           if-no-files-found: error
 
@@ -1171,7 +1217,7 @@ jobs:
       - name: Collect the daemon
         uses: actions/download-artifact@v7
         with:
-          name: generic-ksud-${{ env.FLAVOR }}
+          name: generic-ksud-${{ env.FLAVOR }}${{ inputs.preserve_display && '-preserve-display' || '' }}
           path: kernelsu
 
       - name: The artifact that arrived carries the set this run built
@@ -1214,3 +1260,4 @@ jobs:
             -m "Carries $(python3 -c 'import json,sys; print(", ".join(json.loads(sys.argv[1])))' '${{ env.KMI_SET }}'), built from ${{ env.KSU_REF }} by the ${{ github.workflow }} workflow."
           git pull --rebase --autostash
           git push
+
