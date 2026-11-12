@@ -33,7 +33,7 @@ on:
         type: string
         default: ''
       preserve_display:
-        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only; no publishing)'
+        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only)'
         required: false
         type: boolean
         default: false
@@ -85,7 +85,7 @@ on:
   workflow_dispatch:
     inputs:
       preserve_display:
-        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only; no publishing)'
+        description: 'Apply the experimental display-preserving restart (KernelSU-Next v3.4.2 only)'
         required: false
         type: boolean
         default: false
@@ -290,7 +290,6 @@ jobs:
           set -eu
           test "$FLAVOR" = kernelsu-next
           test "$KSU_REF" = v3.4.2
-          test "${{ inputs.publish }}" != true
           test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
           candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
           git -C KernelSU apply --check "$candidate"
@@ -750,7 +749,6 @@ jobs:
           set -eu
           test "$FLAVOR" = kernelsu-next
           test "$KSU_REF" = v3.4.2
-          test "${{ inputs.publish }}" != true
           test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
           candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
           git -C KernelSU apply --check "$candidate"
@@ -1061,7 +1059,6 @@ jobs:
           set -eu
           test "$FLAVOR" = kernelsu-next
           test "$KSU_REF" = v3.4.2
-          test "${{ inputs.publish }}" != true
           test "$(git -C KernelSU rev-parse HEAD)" = 4c706b5938665866ebe16944a481a7b91e3396af
           candidate="$GITHUB_WORKSPACE/kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch"
           git -C KernelSU apply --check "$candidate"
