@@ -1,7 +1,20 @@
-name: Display-preserving soft reboot validation
+name: Build and publish display-preserving payload
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Commit the built generic daemon and feed to the selected branch
+        type: boolean
+        default: true
+  push:
+    branches:
+      - main
+    paths:
+      - kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch
+      - .github/workflows/ksu-build.yml
+      - .github/workflows/preserve-display.yml
+      - tests/preserve-display/**
   pull_request:
     paths:
       - 'kernelsu/restart-patches/KernelSU-Next-v3.4.2-preserve-display.patch'
@@ -56,4 +69,4 @@ jobs:
       ksu_ref: v3.4.2
       generic_kmis: '["android15-6.6"]'
       preserve_display: true
-      publish: false
+      publish: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}

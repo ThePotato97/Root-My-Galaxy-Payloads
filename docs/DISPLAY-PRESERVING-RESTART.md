@@ -33,9 +33,10 @@ need an exploit payload tailored to an exact firmware build. The supplied phone
 uses KMI `android15-6.6`; this is a kernel branch identifier, not the Android OS
 version (the supplied logs show Android 17).
 
-The **Display-preserving soft reboot validation** workflow runs on this pull
-request and can also be dispatched manually after the workflow is available on
-the default branch. It first applies the existing Samsung patch and this candidate
+The **Build and publish display-preserving payload** workflow validates pull
+requests without publishing. Pushes to `main` build and publish the candidate into the normal generic feed
+in this fork. Manual dispatch offers a
+`publish` checkbox, enabled by default, and publishes into the selected branch. It first applies the existing Samsung patch and this candidate
 to the pinned v3.4.2 source and runs the host harness. It then calls the existing
 KernelSU workflow with:
 
@@ -43,23 +44,26 @@ KernelSU workflow with:
 - ksu_ref: `v3.4.2`
 - generic_kmis: `["android15-6.6"]`
 - preserve_display: `true`
-- publish: `false`
+- publish: enabled for candidate-branch pushes and manual dispatch; disabled for PR validation
 
 This rebuilds the matching generic kernel modules and embeds the no-patch-text
 module into the candidate generic daemon. The relevant artifact is
 `generic-ksud-kernelsu-next-preserve-display`. The separate `ksud-...-aarch64-preserve-display`
 artifact is a compile check without an embedded KMI module and must not be confused
-with the generic output. Existing feed entries and published binaries are unchanged.
+with the generic output. When publishing is enabled, the generic KernelSU-Next feed entry and its binary
+are committed to the run branch in this fork. The feed records the built KMI set,
+size, digest and version. Device-specific feed entries are unchanged.
 
-The optional patch is limited to KernelSU-Next v3.4.2 and rejects publishing.
+The optional patch is limited to the pinned KernelSU-Next v3.4.2 source.
 Normal builds default to `preserve_display: false`. The restart patch lives outside
 the Samsung patch collection so its userspace-only contents do not enter the RKP
 compatibility checks or automatic Samsung rebase process.
 
 The existing app command selects this path once it uses this candidate daemon;
 no new app argument is required. The app still needs to obtain the candidate
-binary through its supported payload selection mechanism. Existing feed entries
-remain unchanged. Verify the build/version match before replacing a daemon.
+binary through its supported payload selection mechanism. Add `ThePotato97/Root-My-Galaxy-Payloads`, branch `main`, to Payload Sources and select the
+KernelSU-Next generic tier. Other enabled sources may take precedence, so disable
+other sources for this test. Verify the selected source and build in the run log.
 
 ## Validation
 
