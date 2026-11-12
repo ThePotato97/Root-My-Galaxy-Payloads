@@ -8,9 +8,9 @@ index c987965..84a1936 100644
      #[command(name = "soft-reboot")]
 -    SoftReboot,
 +    SoftReboot {
-+        /// Restart Zygote only, retaining SurfaceFlinger and the vendor composer
++        /// Use the original full service restart instead of preserving the display stack
 +        #[arg(long)]
-+        preserve_display: bool,
++        full_restart: bool,
 +    },
  
      /// Susfs management
@@ -20,8 +20,8 @@ index c987965..84a1936 100644
              crate::resetprop::resetprop_main(&full_args)
          }
 -        Commands::SoftReboot => crate::soft_reboot::soft_reboot(),
-+        Commands::SoftReboot { preserve_display } => {
-+            crate::soft_reboot::soft_reboot(preserve_display)
++        Commands::SoftReboot { full_restart } => {
++            crate::soft_reboot::soft_reboot(!full_restart)
 +        }
  
          Commands::Insmod { module, params } => debug::insmod(&module, &params),

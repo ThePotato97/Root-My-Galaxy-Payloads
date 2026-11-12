@@ -6,8 +6,10 @@ build establish that the cover display or Vector works on the phone.
 
 ## What changes
 
-KernelSU-Next v3.4.2 gains `ksud soft-reboot --preserve-display`. The ordinary
-command remains unchanged. The optional path runs the emulated-soft-reboot,
+In this experimental build, plain `ksud soft-reboot` selects the display-preserving
+path. The existing app call therefore needs no changes or app fork. Explicit
+`ksud soft-reboot --full-restart` selects the original full service restart.
+The display-preserving path runs the emulated-soft-reboot,
 post-fs-data, services and boot-completed stages, stops only the running Zygotes,
 and starts them again without a bare Android `stop` or `start`. It does not explicitly
 restart SurfaceFlinger, composer, audioserver or netd. Device init dependencies and
@@ -54,9 +56,10 @@ Normal builds default to `preserve_display: false`. The restart patch lives outs
 the Samsung patch collection so its userspace-only contents do not enter the RKP
 compatibility checks or automatic Samsung rebase process.
 
-The app must eventually call the new flag; existing automatic restarts still call
-the old path. Do not overwrite the installed daemon or automatically select this
-candidate before verifying the build/version match and reviewing the failure logs.
+The existing app command selects this path once it uses this candidate daemon;
+no new app argument is required. The app still needs to obtain the candidate
+binary through its supported payload selection mechanism. Existing feed entries
+remain unchanged. Verify the build/version match before replacing a daemon.
 
 ## Validation
 
